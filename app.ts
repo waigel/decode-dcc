@@ -1,8 +1,10 @@
+import axios from "axios";
+import { evaluate } from "certlogic-js";
+
 const base45 = require("base45");
 var zlib = require("zlib");
 const cbor = require("cbor");
 const { verify, webcrypto } = require("cosette/build/sign");
-
 const fs = require("fs");
 
 (async function () {
@@ -63,8 +65,39 @@ const fs = require("fs");
    */
   console.log("============ { HEADER } ============");
   console.log(coseHeader);
-  console.log("\n============ { Payload } ============");
+  console.log("\n============ { PAYLOAD } ============");
   console.log(certPayload);
+
+  console.log("\n============ { VALIDATE } ============");
+  /**
+   * Validate that the iat time is in the past and the eat time is in the future.
+   * So you can ensure that the certificate is valid for the current time.
+   */
+  console.log(
+    "Validate certificate scope is:",
+    validateCertificateScope(coseHeader) ? "VALID" : "NOT VALID"
+  );
+  /**
+   * Evaluate dgc business rules
+   */
+  var rules = await fetchRulesForCountry("DE");
+  rules = rules.filter((x) => x.CertificateType == "Vaccination"); // only Vaccination rules interested here
+  rules.forEach((rule) => {
+    const ruleResult = evaluate(rule.Logic, {
+      external: {
+        validationClock: new Date().toISOString(),
+      },
+      payload: certPayload,
+    });
+    if (!ruleResult) {
+      var errorDescriptions = rule.Description.filter((x) => x.lang == "en");
+      if (errorDescriptions.length == 0) {
+        errorDescriptions = rule.Description;
+      }
+      throw new Error(errorDescriptions[0].desc);
+    }
+  });
+  console.log("All dgc business rules were successfully passed");
 })();
 
 /**
@@ -95,4 +128,50 @@ async function validateSignature(hcertDecoded) {
   } catch (e) {
     return false;
   }
+}
+
+/**
+ * Check if iat is in the past and exp is in the future
+ * @param coseHeader
+ * @returns boolean
+ */
+function validateCertificateScope(coseHeader) {
+  var now = Math.round(Date.now() / 1000);
+  if (now > coseHeader.iat) {
+    return false;
+  }
+  if (now < coseHeader.eat) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Fetch all avaible rules for the certificate issuers country
+ * @param countryCode
+ * @returns {Promise<any>}
+ */
+const dccRuleServer = "https://distribution.dcc-rules.de";
+async function fetchRulesForCountry(countryCode) {
+  var rulesFull = [];
+  var rules = [];
+  await axios
+    .get(`${dccRuleServer}/rules/${countryCode}`)
+    .then((res) => {
+      rules = res.data;
+    })
+    .catch((e) => {
+      throw e;
+    });
+  await new Promise((resolve, reject) => {
+    rules.forEach(async (rule, index) => {
+      await axios
+        .get(`${dccRuleServer}/rules/${countryCode}/${rule.hash}`)
+        .then((res) => {
+          rulesFull.push(res.data);
+        });
+      if (index === rules.length - 1) resolve(true);
+    });
+  });
+  return rulesFull;
 }

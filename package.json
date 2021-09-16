@@ -14,8 +14,10 @@
     "axios": "^0.21.4",
     "base45": "^3.0.0",
     "cbor": "^3.0.3",
+    "certlogic-js": "^0.12.0",
     "cose-js": "^0.6.0",
     "cosette": "^0.8.0",
+    "json-logic-js": "^2.0.1",
     "jsrsasign": "^10.4.0",
     "minizlib": "^2.1.2",
     "zlib": "^1.0.5"
